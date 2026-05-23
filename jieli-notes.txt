@@ -1,0 +1,72 @@
+Poe the Story Bear Notes
+
+Bear has two ear LEDs: right ear (blue) and left ear (green); both ears are also buttons that can be clicked/squeezed (gently)
+
+Neither ear lit: Either bear's power switch is off, or bear's advertising/waiting for connection cycle has ended -- can click right (blue) ear to wake it up again and start advertising cycle again
+
+Right (Blue) Ear LED blinks continuously: Not connected; advertising BLE and waiting for classic Bluetooth pairing
+
+Left (Green) Ear LED solid green, right (blue) ear LED off: Classic Bluetooth (HFP) connection active; this is the normal state during voice conversation with Sunny (loca-talk.py). Audio streams in real time over HFP in this state -- no BLE upload needed.
+
+Both ears solid: BLE GATT connection active (in addition to or instead of Classic BT), awaiting commands. loca-shell.py and loca-say.py operate in this state.
+
+Both ears flashing: BLE command received; executing command (uploading MP3 file, clearing flash storage, etc.). ClearAll takes ~6 seconds regardless of storage content.
+
+--- Audio playback ---
+
+HFP mode (Sunny conversation): Audio streams directly from the PC to the bear's speaker in real time via mSBC codec. Mouth does NOT move (no lip-sync). Low latency -- suitable for real-time conversation.
+
+BLE mode (loca-say / loca-shell): Audio is encoded as MP3 (64kbps CBR), uploaded to bear's internal flash storage, then triggered for playback with the "try" command. Mouth DOES move (lip-sync). High latency (~6s for ClearAll + upload time) -- not suitable for real-time conversation.
+
+--- Internal storage ---
+Bear uses a Jieli AC6966 SoC. Files must be named U-<19 base64 chars> to be indexed by firmware. Storage can hold multiple files simultaneously (observed 6 at once). Capacity: getDisk reports free space in opaque units (~804 bytes/unit observed); total appears to be several MB.
+
+--- Bluetooth ---
+Bear exposes two separate Bluetooth interfaces:
+  Classic BT MAC: 66:58:94:72:31:24  (HFP audio)
+  BLE MAC:        66:58:94:72:31:25  (GATT file upload -- Classic MAC + 1)
+
+Both can be active simultaneously; loca-watcher connects Classic BT and sets HFP mSBC profile automatically when bear powers on.
+
+--- Ear buttons and LEDs ---
+Ear buttons appear to send no signals over Bluetooth (classic or BLE) -- they are likely hardwired to the SoC and not externally controllable or observable. Not reverse-engineerable via Bluetooth.
+Ear LEDs similarly cannot be directly controlled -- they respond only to internal SoC state driven by Bluetooth activity. No known GATT command or HFP signal affects them directly.
+
+--- Internal storage ---
+Intended by the manufacturer to hold multiple 2-3 minute MP3s (user "favorites" saved from the companion app).
+
+Files can be deleted individually by ID using the deleteRing command (confirmed via decompiled app source and live testing). The ID must be passed without the .mp3 extension. deleteRing returns status 1 (PENDING) immediately, then status 0 (OK) when complete -- typically ~0.66s. This is much faster than ClearAll (~6s).
+
+ClearAll should be avoided wherever possible: it wipes all stored files including stories saved by the companion app. loca-say.py uploads a file, plays it, then deletes only that file by ID.
+
+The official app implies users can "download favorites" to their device, but it is unclear whether this means downloading from the bear's flash storage or downloading from a cloud server to the device. No known GATT command for reading files back from the bear has been identified; getAudioList returns filenames only.
+
+--- Full command list (from decompiled app source) ---
+Static commands:
+  getAudioList   List stored audio files
+  BatLevel       Get battery level (note: leading space in JSON -- " BatLevel")
+  getBtstatus    Get Bluetooth status
+  ClearAll       Wipe all stored files (~6s, avoid if possible)
+  EDRconnet      Connect Classic BT from bear side
+  EDRclose       Disconnect Classic BT from bear side
+  getDisk        Get disk usage info
+  getName        Get bear name
+  getVolume      Get current volume (parm "1")
+  setPauseon     Pause playback
+  setPauseoff    Resume playback
+  readUUid       Read UUID
+  SetBtPlay      Start Classic BT audio stream
+  SetBtPAUSE     Pause Classic BT audio stream
+  getStatus      Get device status
+  playmusic      Stop audio playback (parm "0")
+  test           Test command
+  getVersion     Get firmware version
+
+Dynamic commands (parm varies):
+  try            Play a stored file by ID
+  deleteRing     Delete a stored file by ID (polls status; ~0.66s)
+  setVolume      Set volume
+
+--- Unknown ---
+FF61 GATT characteristic (0000ff61) -- purpose unknown.
+Battery level reporting -- BatLevel command exists but behavior under low battery is unobserved.

@@ -1,0 +1,15 @@
+---
+topic: Your Quiz Topic
+explanation: "Instructions shown to the player before the quiz begins."
+right: You are correct! Well done!
+wrong: I'm sorry, that's not right. Would you like to try again?
+questions:
+  - q: The first blank in the question.
+    a: Answer
+  - q: Another question with a blank.
+    a: Answer
+random:
+  - An encouraging comment said at random during the quiz.
+  - Another encouraging comment.
+  - Yet another one.
+closing: Thank you for playing!

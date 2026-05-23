@@ -1,0 +1,136 @@
+---
+# Device hardware settings live in audio_device.yaml and ble_device.yaml.
+# Copy those .example files and fill in your device's values.
+
+tts:
+  # Kokoro voice name — see https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md
+  voice: af_heart
+
+  # TTS speed (1.0 = normal, <1.0 = slower/warmer)
+  speed: 0.85
+
+  pad_duration: 0.3       # seconds of silence appended to BLE uploads
+  mp3_bitrate: 64k        # CBR bitrate for BLE uploads
+
+stt:
+  whisper_model: base.en
+  whisper_device: cpu
+  whisper_compute: int8
+  # Segments with no_speech_prob above this are discarded (0.0–1.0; lower = stricter)
+  no_speech_threshold: 0.6
+  # Segments with avg_logprob below this are discarded (0.0 = perfect; more negative = stricter)
+  logprob_threshold: -1.0
+  # Utterances whose beginning fuzzy-matches any of these variants are silently
+  # dropped. Intended to filter out invocations of a foreign voice assistant
+  # (e.g. OVOS/Mycroft, Alexa, Google, Siri) so loca-talk does not respond to
+  # them. Only the start of the utterance is checked, so longer sentences that
+  # happen to contain one of these words are not affected.
+  # Add new variants as Whisper introduces them — it rarely transcribes wake
+  # words the same way twice.
+  # threshold: 0.0–1.0 similarity; 0.85 catches close variants without
+  # risking false positives on normal speech.
+  wake_word_filter:
+    threshold: 0.85
+    variants: []
+    # - "hey mycroft"
+    # - "hey alexa"
+    # - "hey google"
+    # - "hey siri"
+
+llm:
+  # Default provider; overridden by hfp_secret.yaml or the --llm flag.
+  # Valid values: ollama, claude, openrouter
+  provider: ollama
+
+  # Display name of the assistant and the user — used in logs and injected
+  # into memory prompts. Override in hfp_secret.yaml for your persona.
+  assistant_name: Assistant
+  user_name: User
+  # Pronouns used when referring to the user and assistant in memory prompts.
+  # Format: "subject/object/possessive" (e.g. "she/her/her", "he/him/his", "they/them/their")
+  user_pronouns: they/them/their
+  assistant_pronouns: they/them/their
+
+  # Header prepended to the memory block injected into every system prompt.
+  # {assistant_name} and {user_name} are substituted at startup.
+  memory_header: "What {assistant_name} remembers about {user_name}:"
+
+  # Appended to the system prompt for all providers. Use this to reinforce
+  # character and handle refusals gracefully. Leave empty to disable.
+  character_reinforcement: ""
+
+  # Responses matching refusal phrases are replaced with one of these at
+  # random. Generic defaults; override in hfp_secret.yaml for your persona.
+  refusal_redirects:
+    - "Let's talk about something else!"
+    - "How about we change the subject?"
+    - "I'd rather not go there — what else is on your mind?"
+    - "Let's try a different topic."
+
+vad:
+  silence_seconds: 0.8    # seconds of silence to end an utterance
+  min_speech_secs: 0.3    # ignore utterances shorter than this
+  max_record_secs: 30     # safety cutoff
+  noise_headroom: 800     # RMS units above noise floor to set speech threshold
+
+triggers:
+  check_interval: 15  # seconds between HA polls
+
+  # Binary/text sensors: fire when state transitions TO watch_state.
+  sensors: []
+  # Example:
+  #   - entity: binary_sensor.your_sensor
+  #     watch_state: on
+  #     event_text: "The sensor just turned on."
+
+  # Illuminance sensor: assistant reacts to significant light level changes.
+  # Set to your sensor's entity ID, or leave blank to disable.
+  illuminance_entity: ""
+
+  # Bedtime trigger: fires once when the clock crosses this hour (24h).
+  bedtime_hour: 23
+
+  # Sleep mode: assistant stops responding until woken.
+  # sleep_entity: input_boolean.sunny_sleeping  # HA entity — on=sleeping, off=awake
+  sleep_phrases:
+    - "go to sleep"
+    - "goodnight"
+    - "sleep time"
+  wake_phrases:
+    - "wake up"
+    - "good morning"
+    - "rise and shine"
+  # sleep_response: ""   # spoken when going to sleep (default: "Goodnight, {user_name}. Sweet dreams!")
+  # wake_response: ""    # spoken when waking up (default: "Good morning, {user_name}!")
+
+memory:
+  # Number of conversation turns to persist between sessions:
+  max_recent_turns: 8
+  # Compact long-term memory after this many new turns:
+  compact_every: 10
+
+ollama:
+  url: http://localhost:11434/api/chat
+  # model: set in hfp_secret.yaml
+  options:
+    temperature: 0.72
+    repeat_penalty: 1.3
+    top_p: 0.9
+    num_predict: 250
+
+  greeting: Hello! How are you today?
+
+  system_prompt: |
+    You are a friendly and warm assistant. You speak directly to your person
+    in first person, warmly and simply.
+
+    You are aware of the current time and room conditions, which are provided
+    at the start of each conversation turn. Use this information naturally.
+    Never read out the sensor values literally.
+
+    You speak in short, warm, simple sentences. You never use lists. You never
+    ask open-ended questions — instead you make warm suggestions.
+
+    IMPORTANT: Respond in 1-2 short sentences. Don't monopolize the
+    conversation. Exception: when telling a story, use as many sentences as
+    the story needs.

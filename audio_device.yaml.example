@@ -1,0 +1,43 @@
+---
+# Audio device configuration — copy to audio_device.yaml and fill in your values.
+#
+# This file supports two layouts:
+#   - A single Bluetooth HFP device providing both mic and speaker (most common)
+#   - Separate input and output devices (e.g. USB mic + Bluetooth speaker)
+#
+# Finding your PipeWire device names:
+#   pw-cli list-objects | grep -A3 'node.name'
+# or:
+#   pactl list sinks short
+#   pactl list sources short
+
+audio:
+  input:
+    # PipeWire source name for your microphone:
+    source: bluez_input.YOUR_MAC_UNDERSCORED.0
+                                        # e.g. bluez_input.66_58_94_72_31_24.0
+                                        # or:  alsa_input.usb_your_mic_name
+
+    # Bluetooth MAC address — enables connection monitoring and auto-reconnect.
+    # Remove or leave blank if your mic is not a Bluetooth device.
+    bt_mac: "YOUR:BT:MAC:HERE"          # e.g. "66:58:94:72:31:24"
+
+    # PipeWire card and HFP profile — only needed for Bluetooth HFP devices.
+    # Remove if your mic is not HFP (e.g. it's a USB mic or A2DP-only device).
+    bt_card: bluez_card.YOUR_MAC_UNDERSCORED
+    bt_profile: headset-head-unit-msbc
+
+    # Microphone gain boost (PipeWire/PulseAudio volume string).
+    # 100% = unity gain. Many Bluetooth mics need 200–300% to be usable.
+    mic_volume: 300%
+
+  output:
+    # PipeWire sink name for your speaker:
+    sink: bluez_output.YOUR_MAC_UNDERSCORED.1
+                                        # e.g. bluez_output.66_58_94_72_31_24.1
+                                        # or:  alsa_output.usb_your_speaker_name
+
+    # Bluetooth MAC address for the output device.
+    # Can be the same as input (single HFP device) or different.
+    # Remove or leave blank if your speaker is not a Bluetooth device.
+    bt_mac: "YOUR:BT:MAC:HERE"

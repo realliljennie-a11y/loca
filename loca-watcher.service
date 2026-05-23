@@ -1,0 +1,15 @@
+[Unit]
+Description=LOCA Bluetooth device watcher
+After=bluetooth.target pipewire.service pipewire-pulse.service
+Wants=bluetooth.target pipewire.service
+
+[Service]
+Type=simple
+ExecStart=@@PROJ_DIR@@/loca-watcher.sh
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

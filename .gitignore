@@ -1,0 +1,15 @@
+config.yaml
+*_secret.yaml
+*_device.yaml
+quiz.yaml
+memory/
+training/
+*.gguf
+__pycache__/
+*.pyc
+*.pyo
+.env
+.venv/
+*.onnx
+*.onnx.json
+*~

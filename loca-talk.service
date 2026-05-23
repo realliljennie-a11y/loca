@@ -1,0 +1,16 @@
+[Unit]
+Description=LOCA conversational pipeline
+After=network.target ollama.service
+# Do not start automatically — loca-watcher starts and stops this
+# based on the device's Bluetooth connection state.
+
+[Service]
+Type=simple
+ExecStart=@@PROJ_DIR@@/loca-talk.py --greet
+Restart=no
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+# Intentionally not installed — managed by loca-watcher

@@ -1,0 +1,13 @@
+---
+# BLE device configuration — copy to ble_device.yaml and fill in your values.
+#
+# This is only needed if you are using the BLE audio upload scripts
+# (loca-say.py, loca-shell.py) with a Jieli AC6966-based device.
+# It is not required for the HFP voice conversation pipeline (loca-talk.py).
+#
+# Finding your BLE MAC address:
+#   bluetoothctl scan on   (look for your device)
+# On many Jieli devices the BLE MAC is the Classic BT MAC + 1 on the last octet.
+
+ble:
+  mac: "YOUR:BLE:MAC:HERE"             # e.g. "66:58:94:72:31:25"
