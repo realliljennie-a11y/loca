@@ -413,90 +413,112 @@ def illum_transition_text(from_band: str, to_band: str) -> str | None:
 async def sensor_watcher(http: httpx.AsyncClient,
                           event_queue: asyncio.Queue,
                           verbose: bool = False) -> None:
-    """Background task: poll HA sensors and push events on state changes."""
-    interval        = TRIGGERS.get("check_interval", 15)
-    sensor_cfgs     = TRIGGERS.get("sensors", [])
-    illum_entity    = TRIGGERS.get("illuminance_entity")
-    bedtime_hour    = TRIGGERS.get("bedtime_hour")
-    headers         = {"Authorization": f"Bearer {HA_TOKEN}"}
+    """Background task: subscribe to HA WebSocket state changes for sensors and illuminance."""
+    import websockets
 
-    last_states: dict[str, str] = {}
+    sensor_cfgs  = TRIGGERS.get("sensors", [])
+    illum_entity = TRIGGERS.get("illuminance_entity")
+
+    entities = list({s["entity"] for s in sensor_cfgs})
+    if illum_entity:
+        entities.append(illum_entity)
+    if not entities:
+        return
+
+    # entity → list of (watch_state, event_text) pairs
+    sensor_map: dict[str, list[tuple[str, str]]] = {}
+    for s in sensor_cfgs:
+        sensor_map.setdefault(s["entity"], []).append(
+            (s["watch_state"].lower(), s["event_text"]))
+
+    ha_base = re.sub(r"/api/.*$", "", HA_URL)
+    ws_url  = ha_base.replace("https://", "wss://").replace("http://", "ws://") \
+              + "/api/websocket"
+
+    # Fetch initial illuminance band so first transition has a baseline.
     last_illum_band: str | None = None
-    last_hour: int | None       = None
-
-    # Initialise state without triggering
-    for sensor in sensor_cfgs:
-        try:
-            r = await http.get(f"{HA_URL}/{sensor['entity']}",
-                               headers=headers, timeout=3.0)
-            if r.status_code == 200:
-                last_states[sensor["entity"]] = \
-                    r.json().get("state", "").lower()
-        except Exception:
-            pass
     if illum_entity:
         try:
             r = await http.get(f"{HA_URL}/{illum_entity}",
-                               headers=headers, timeout=3.0)
+                               headers={"Authorization": f"Bearer {HA_TOKEN}"}, timeout=3.0)
             if r.status_code == 200:
-                last_illum_band = lux_to_band(
-                    float(r.json().get("state", 0)))
+                last_illum_band = lux_to_band(float(r.json().get("state", 0)))
         except Exception:
             pass
-    last_hour = time.localtime().tm_hour
 
     while True:
-        await asyncio.sleep(interval)
         try:
-            # Binary/text sensors — fetch each entity once, then check all watchers
-            fetched: dict[str, str] = {}
-            for sensor in sensor_cfgs:
-                entity = sensor["entity"]
-                if entity not in fetched:
-                    r = await http.get(f"{HA_URL}/{entity}",
-                                       headers=headers, timeout=3.0)
-                    if r.status_code != 200:
-                        continue
-                    fetched[entity] = r.json().get("state", "").lower()
-                state = fetched[entity]
-                prev  = last_states.get(entity)
+            async with websockets.connect(ws_url) as ws:
+                msg = json.loads(await ws.recv())
+                if msg.get("type") != "auth_required":
+                    raise RuntimeError(f"unexpected HA WS message: {msg}")
+                await ws.send(json.dumps({"type": "auth", "access_token": HA_TOKEN}))
+                msg = json.loads(await ws.recv())
+                if msg.get("type") != "auth_ok":
+                    raise RuntimeError("HA WebSocket authentication failed")
+
+                await ws.send(json.dumps({
+                    "id": 1,
+                    "type": "subscribe_trigger",
+                    "trigger": {"platform": "state", "entity_id": entities},
+                }))
+                await ws.recv()  # result confirmation
+
                 if verbose:
-                    print(f"  [sensor_watcher] {entity}: prev={prev!r} now={state!r} watch={sensor['watch_state']!r}")
-                if prev is not None \
-                        and prev not in ("unavailable", "unknown") \
-                        and prev != state \
-                        and state == sensor["watch_state"]:
+                    print(f"  [sensor_watcher] subscribed to {entities}")
+
+                async for raw in ws:
+                    msg = json.loads(raw)
+                    if msg.get("type") != "event":
+                        continue
+                    trigger    = (msg.get("event", {})
+                                     .get("variables", {})
+                                     .get("trigger", {}))
+                    entity_id  = trigger.get("entity_id", "")
+                    from_state = trigger.get("from_state", {}).get("state", "").lower()
+                    to_state   = trigger.get("to_state",   {}).get("state", "").lower()
+
                     if verbose:
-                        print(f"  [sensor_watcher] queuing: {sensor['event_text']!r}")
-                    await event_queue.put(sensor["event_text"])
-            for entity, state in fetched.items():
-                last_states[entity] = state
+                        print(f"  [sensor_watcher] {entity_id}: {from_state!r} → {to_state!r}")
 
-            # Illuminance band transitions
-            if illum_entity:
-                r = await http.get(f"{HA_URL}/{illum_entity}",
-                                   headers=headers, timeout=3.0)
-                if r.status_code == 200:
-                    band = lux_to_band(float(r.json().get("state", 0)))
-                    if last_illum_band is not None \
-                            and band != last_illum_band:
-                        text = illum_transition_text(last_illum_band, band)
-                        if text:
-                            await event_queue.put(text)
-                    last_illum_band = band
+                    if entity_id == illum_entity:
+                        try:
+                            band = lux_to_band(float(to_state))
+                        except ValueError:
+                            continue
+                        if last_illum_band is not None and band != last_illum_band:
+                            text = illum_transition_text(last_illum_band, band)
+                            if text:
+                                await event_queue.put(text)
+                        last_illum_band = band
+                        continue
 
-            # Bedtime hour transition
-            if bedtime_hour is not None:
-                hour = time.localtime().tm_hour
-                if last_hour != hour and hour == bedtime_hour:
-                    await event_queue.put(
-                        f"It just turned {bedtime_hour}:00 — bedtime.")
-                last_hour = hour
+                    for watch_state, event_text in sensor_map.get(entity_id, []):
+                        if from_state not in ("unavailable", "unknown") \
+                                and from_state != to_state \
+                                and to_state == watch_state:
+                            if verbose:
+                                print(f"  [sensor_watcher] queuing: {event_text!r}")
+                            await event_queue.put(event_text)
 
         except Exception as e:
             if verbose:
-                print(f"  [watcher error] {type(e).__name__}: {e}")
-            pass  # transient HA errors are non-fatal
+                print(f"  [sensor_watcher] {type(e).__name__}: {e} — reconnecting in 5s")
+            await asyncio.sleep(5)
+
+
+async def bedtime_watcher(event_queue: asyncio.Queue) -> None:
+    """Background task: queue a bedtime event when the clock reaches bedtime_hour."""
+    bedtime_hour = TRIGGERS.get("bedtime_hour")
+    if bedtime_hour is None:
+        return
+    last_hour = time.localtime().tm_hour
+    while True:
+        await asyncio.sleep(30)
+        hour = time.localtime().tm_hour
+        if last_hour != hour and hour == bedtime_hour:
+            await event_queue.put(f"It just turned {bedtime_hour}:00 — bedtime.")
+        last_hour = hour
 
 async def ovos_watcher(verbose: bool = False) -> None:
     """Background task: subscribe to HA WebSocket state changes for OVOS speaking."""
@@ -1037,12 +1059,16 @@ async def conversation_loop(args):
     print("\nConversation started. Ctrl-C to exit.\n")
 
     event_queue: asyncio.Queue = asyncio.Queue()
-    _readline_task = None
+    _readline_task   = None
+    _bedtime_watcher = None
 
     async with httpx.AsyncClient(timeout=120) as http:
         _sensor_watcher = asyncio.create_task(
                       sensor_watcher(http, event_queue, verbose=args.verbose)) \
                   if TRIGGERS else None
+        _bedtime_watcher = asyncio.create_task(
+                       bedtime_watcher(event_queue)) \
+                   if TRIGGERS else None
         _ovos_watcher = asyncio.create_task(
                             ovos_watcher(verbose=args.verbose)) \
                         if OVOS_ENTITY else None
@@ -1302,6 +1328,8 @@ async def conversation_loop(args):
 
         if _sensor_watcher:
             _sensor_watcher.cancel()
+        if _bedtime_watcher:
+            _bedtime_watcher.cancel()
 
     # SIGTERM path — save memory, no goodbye
     save_recent_turns(history)
