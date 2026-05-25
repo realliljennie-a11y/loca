@@ -45,9 +45,9 @@ DEFAULT_VOICE = CFG["tts"]["voice"]
 SPEED         = CFG["tts"]["speed"]
 PAD_DURATION  = CFG["tts"]["pad_duration"]
 MP3_BITRATE   = CFG["tts"]["mp3_bitrate"]
-OLLAMA_URL    = CFG["llm"]["ollama_url"]
-OLLAMA_MODEL  = CFG["llm"]["ollama_model"]
-SYSTEM_PROMPT = CFG["system_prompt"]
+OLLAMA_URL    = CFG["ollama"]["url"]
+OLLAMA_MODEL  = CFG["ollama"]["model"]
+SYSTEM_PROMPT = CFG["ollama"]["system_prompt"]
 
 # ── TTS pipeline (lazy singleton) ─────────────────────────────────────────────
 
@@ -330,6 +330,39 @@ class Bear:
     async def stop(self) -> dict:
         return await self._send_raw('{"cmd":"playmusic","parm":"0"}')
 
+    async def pause(self) -> dict:
+        return await self._send_raw('{"cmd":"setPauseon","parm":"0"}')
+
+    async def resume(self) -> dict:
+        return await self._send_raw('{"cmd":"setPauseoff","parm":"0"}')
+
+    async def status(self) -> dict:
+        return await self._send_raw('{"cmd":"getStatus","parm":"0"}')
+
+    async def bt_status(self) -> dict:
+        return await self._send_raw('{"cmd":"getBtstatus","parm":"0"}')
+
+    async def set_volume(self, level: int) -> dict:
+        return await self._send_raw(f'{{"cmd":"setVolume","parm":"{level}"}}')
+
+    async def bt_play(self) -> dict:
+        return await self._send_raw('{"cmd":"SetBtPlay","parm":"0"}')
+
+    async def bt_pause(self) -> dict:
+        return await self._send_raw('{"cmd":"SetBtPAUSE","parm":"0"}')
+
+    async def edr_connect(self) -> dict:
+        return await self._send_raw('{"cmd":"EDRconnet","parm":"0"}')
+
+    async def edr_close(self) -> dict:
+        return await self._send_raw('{"cmd":"EDRclose","parm":"0"}')
+
+    async def read_uuid(self) -> dict:
+        return await self._send_raw('{"cmd":"readUUid","parm":"0"}')
+
+    async def test(self) -> dict:
+        return await self._send_raw('{"cmd":"test","parm":"0"}')
+
     async def list_files(self) -> list:
         resp = await self._send_raw('{"cmd":"getAudioList","parm":"0"}')
         status = str(resp.get("status", ""))
@@ -392,10 +425,21 @@ def tts_to_mp3(text: str,
 
 HELP = """
 Commands:
-  info                     Device info (version, disk, battery, volume)
+  info                     Device info (version, disk, battery, volume, name)
+  status                   getStatus response
+  btstatus                 getBtstatus (Classic BT connection state)
   list                     List files on bear
   play <id>                Play a stored file by ID
-  stop                     Stop playback
+  stop                     Stop playback (playmusic)
+  pause                    Pause playback (setPauseon)
+  resume                   Resume playback (setPauseoff)
+  setvol <0-15>            Set volume (setVolume)
+  btplay                   Start Classic BT audio stream (SetBtPlay)
+  btpause                  Stop Classic BT audio stream (SetBtPAUSE)
+  edrconnect               Reconnect Classic BT (EDRconnet)
+  edrclose                 Disconnect Classic BT (EDRclose)
+  uuid                     Read device UUID (readUUid)
+  test                     Send test command
   clear                    ClearAll and wait for completion
   delete <id>              Delete a single file by ID (no .mp3 extension)
   upload <path> [<id>]     Upload an MP3 file (generates ID if omitted)
@@ -458,6 +502,42 @@ async def repl(bear: Bear):
 
             elif cmd == "disk":
                 print(await bear._send_raw('{"cmd":"getDisk","parm":"0"}'))
+
+            elif cmd == "status":
+                print(await bear.status())
+
+            elif cmd == "btstatus":
+                print(await bear.bt_status())
+
+            elif cmd == "pause":
+                print(await bear.pause())
+
+            elif cmd == "resume":
+                print(await bear.resume())
+
+            elif cmd == "setvol":
+                if not args:
+                    print("  Usage: setvol <0-15>")
+                    continue
+                print(await bear.set_volume(int(args[0])))
+
+            elif cmd == "btplay":
+                print(await bear.bt_play())
+
+            elif cmd == "btpause":
+                print(await bear.bt_pause())
+
+            elif cmd == "edrconnect":
+                print(await bear.edr_connect())
+
+            elif cmd == "edrclose":
+                print(await bear.edr_close())
+
+            elif cmd == "uuid":
+                print(await bear.read_uuid())
+
+            elif cmd == "test":
+                print(await bear.test())
 
             elif cmd == "list":
                 files = await bear.list_files()
