@@ -147,13 +147,13 @@ SYSTEM_PROMPT   = _substitute(_ollama_cfg.get("system_prompt") or CFG.get("syste
 
 TRIGGERS        = CFG.get("triggers", {})
 OVOS_ENTITY     = TRIGGERS.get("ovos_speaking_entity", "")
-SLEEP_ENTITY    = TRIGGERS.get("sleep_entity", "")
+AWAKE_ENTITY    = TRIGGERS.get("awake_entity", "")
 SLEEP_PHRASES   = [p.lower().strip() for p in TRIGGERS.get("sleep_phrases",
                    ["go to sleep", "goodnight", "sleep time"])]
 WAKE_PHRASES    = [p.lower().strip() for p in TRIGGERS.get("wake_phrases",
                    ["wake up", "good morning", "rise and shine"])]
 SLEEP_RESPONSE  = _substitute(TRIGGERS.get("sleep_response") or
-                               "Shhh, I'm going to sleep now.")
+                               "I'm going to sleep now.")
 WAKE_RESPONSE   = _substitute(TRIGGERS.get("wake_response") or GREETING)
 
 MAX_RECENT_TURNS = CFG.get("memory", {}).get("max_recent_turns", 20)
@@ -173,7 +173,11 @@ _ovos_speaking: bool = False
 
 # ── Sleep mode flag ───────────────────────────────────────────────────────────
 
-_sleeping: bool = False
+_awake: bool = True
+
+# ── Speaking gate (prevents mic from hearing Sunny's own voice) ───────────────
+
+_sunny_speaking: bool = False
 
 def _handle_signal(signum, frame):
     """Handle SIGTERM from systemd — set flag, let the loop exit cleanly."""
@@ -567,9 +571,9 @@ async def ovos_watcher(verbose: bool = False) -> None:
             _ovos_speaking = False
             await asyncio.sleep(5)
 
-async def sleep_watcher(verbose: bool = False, silent: bool = False) -> None:
+async def awake_watcher(verbose: bool = False, silent: bool = False) -> None:
     """Background task: subscribe to HA WebSocket state changes for sleep mode entity."""
-    global _sleeping
+    global _awake, _sunny_speaking
     import websockets
 
     ha_base = re.sub(r"/api/.*$", "", HA_URL)
@@ -590,12 +594,12 @@ async def sleep_watcher(verbose: bool = False, silent: bool = False) -> None:
                 await ws.send(json.dumps({
                     "id": 1,
                     "type": "subscribe_trigger",
-                    "trigger": {"platform": "state", "entity_id": SLEEP_ENTITY},
+                    "trigger": {"platform": "state", "entity_id": AWAKE_ENTITY},
                 }))
                 await ws.recv()  # result confirmation
 
                 if verbose:
-                    print(f"  [sleep_watcher] subscribed to {SLEEP_ENTITY}")
+                    print(f"  [awake_watcher] subscribed to {AWAKE_ENTITY}")
 
                 async for raw in ws:
                     msg = json.loads(raw)
@@ -606,24 +610,26 @@ async def sleep_watcher(verbose: bool = False, silent: bool = False) -> None:
                                    .get("trigger", {})
                                    .get("to_state", {}))
                     state       = to_state.get("state", "").lower()
-                    new_sleeping = state in ("on", "true")
-                    if new_sleeping == _sleeping:
+                    new_awake = state in ("on", "true")
+                    if new_awake == _awake:
                         continue
-                    _sleeping = new_sleeping
+                    _awake = new_awake
                     if verbose:
-                        print(f"  [sleep_watcher] sleeping: {_sleeping}")
+                        print(f"  [awake_watcher] awake: {_awake}")
                     if not silent:
-                        response = SLEEP_RESPONSE if _sleeping else WAKE_RESPONSE
+                        response = WAKE_RESPONSE if _awake else SLEEP_RESPONSE
+                        _sunny_speaking = True  # set now, before executor starts
                         try:
+                            print(f"{ASSISTANT_NAME} (non-LLM): {response}")
                             await asyncio.get_running_loop().run_in_executor(
                                 None, lambda r=response: speak(
                                     r, voice=DEFAULT_VOICE, speed=SPEED, sink=AUDIO_SINK))
                         except Exception:
-                            pass
+                            _sunny_speaking = False
 
         except Exception as e:
             if verbose:
-                print(f"  [sleep_watcher] {type(e).__name__}: {e} — reconnecting in 5s")
+                print(f"  [awake_watcher] {type(e).__name__}: {e} — reconnecting in 5s")
             await asyncio.sleep(5)
 
 # ── Home Assistant context ────────────────────────────────────────────────────
@@ -696,28 +702,32 @@ def speak(text: str,
           speed: float = SPEED,
           sink: str = AUDIO_SINK) -> None:
     """Render text with Kokoro and play directly to PipeWire sink."""
+    global _sunny_speaking
     text = _apply_pronunciation_fixes(text)
-    pipeline = _get_tts()
-    chunks = [audio for _, _, audio in pipeline(text, voice=voice, speed=speed)]
-    if not chunks:
-        return
-    pcm_float = np.concatenate(chunks)
-    pcm_int16 = (np.clip(pcm_float, -1.0, 1.0) * 32767).astype(np.int16)
-    # Prepend silence to avoid HFP transport clipping the start
-    silence = np.zeros(int(24000 * 0.15), dtype=np.int16)
-    pcm_bytes = np.concatenate([silence, pcm_int16]).tobytes()
-
-    pw = subprocess.Popen(
-        ["pw-play",
-         f"--target={sink}",
-         "--channels=1",
-         "--rate=24000",
-         "--format=s16",
-         "-"],
-        stdin=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    pw.communicate(input=pcm_bytes)
+    _sunny_speaking = True
+    try:
+        pipeline = _get_tts()
+        chunks = [audio for _, _, audio in pipeline(text, voice=voice, speed=speed)]
+        if not chunks:
+            return
+        pcm_float = np.concatenate(chunks)
+        pcm_int16 = (np.clip(pcm_float, -1.0, 1.0) * 32767).astype(np.int16)
+        # Prepend silence to avoid HFP transport clipping the start
+        silence = np.zeros(int(24000 * 0.15), dtype=np.int16)
+        pcm_bytes = np.concatenate([silence, pcm_int16]).tobytes()
+        pw = subprocess.Popen(
+            ["pw-play",
+             f"--target={sink}",
+             "--channels=1",
+             "--rate=24000",
+             "--format=s16",
+             "-"],
+            stdin=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        pw.communicate(input=pcm_bytes)
+    finally:
+        _sunny_speaking = False
 
 # ── Microphone recording with VAD ─────────────────────────────────────────────
 
@@ -754,7 +764,7 @@ def record_utterance(source: str = AUDIO_SOURCE,
 
     try:
         while total_chunks < max_chunks:
-            if _ovos_speaking:
+            if _ovos_speaking or _sunny_speaking:
                 frames = []  # discard anything captured so far
                 break
             chunk = proc.stdout.read(chunk_bytes)
@@ -966,7 +976,7 @@ def _is_refusal(text: str) -> bool:
 # ── Main conversation loop ────────────────────────────────────────────────────
 
 async def conversation_loop(args):
-    global _shutdown_requested, _sleeping
+    global _shutdown_requested, _awake, _sunny_speaking
 
     loop = asyncio.get_running_loop()
     _this_task = asyncio.current_task()
@@ -1054,18 +1064,18 @@ async def conversation_loop(args):
 
     async with httpx.AsyncClient(timeout=120) as http:
         # Fetch initial sleep state before greeting so we know whether to speak.
-        if SLEEP_ENTITY:
+        if AWAKE_ENTITY:
             try:
-                r = await http.get(f"{HA_URL}/{SLEEP_ENTITY}",
+                r = await http.get(f"{HA_URL}/{AWAKE_ENTITY}",
                                    headers={"Authorization": f"Bearer {HA_TOKEN}"}, timeout=3.0)
                 if r.status_code == 200:
-                    _sleeping = r.json().get("state", "").lower() == "on"
+                    _awake = r.json().get("state", "").lower() == "on"
                     if args.verbose:
-                        print(f"  [init] sleeping={_sleeping}")
+                        print(f"  [init] awake={_awake}")
             except Exception:
                 pass
 
-        if args.greet and not _sleeping:
+        if args.greet and _awake:
             print(f"{ASSISTANT_NAME}: {GREETING}")
             if not args.silent:
                 try:
@@ -1084,9 +1094,9 @@ async def conversation_loop(args):
         _ovos_watcher = asyncio.create_task(
                             ovos_watcher(verbose=args.verbose)) \
                         if OVOS_ENTITY else None
-        _sleep_watcher = asyncio.create_task(
-                             sleep_watcher(verbose=args.verbose, silent=args.silent)) \
-                         if SLEEP_ENTITY else None
+        _awake_watcher = asyncio.create_task(
+                             awake_watcher(verbose=args.verbose, silent=args.silent)) \
+                         if AWAKE_ENTITY else None
 
         while not _shutdown_requested:
             try:
@@ -1105,7 +1115,7 @@ async def conversation_loop(args):
                 # ── Sensor-triggered events ────────────────────────────────
                 while not event_queue.empty():
                     event_text = event_queue.get_nowait()
-                    if _sleeping:
+                    if not _awake:
                         print(f"\n[event] {event_text} (ignored; sleeping)")
                         continue
                     print(f"\n[event] {event_text}")
@@ -1179,7 +1189,7 @@ async def conversation_loop(args):
                         print()
                         continue
                 else:
-                    if _ovos_speaking:
+                    if _ovos_speaking or _sunny_speaking:
                         await asyncio.sleep(0.2)
                         continue
                     t_start = time.monotonic()
@@ -1191,7 +1201,7 @@ async def conversation_loop(args):
                             verbose=args.verbose))
                     t_recorded = time.monotonic()
 
-                    if not pcm:
+                    if not pcm or _sunny_speaking:
                         continue
 
                     if args.verbose:
@@ -1219,8 +1229,8 @@ async def conversation_loop(args):
                 # ── Sleep / wake voice commands ────────────────────────────
                 _norm = re.sub(r"[^a-z0-9 ]", "", user_text.lower()).strip()
                 if WAKE_PHRASES and any(p in _norm for p in WAKE_PHRASES):
-                    if _sleeping:
-                        _sleeping = False
+                    if not _awake:
+                        _awake = True
                         if args.verbose:
                             print("  [woken by voice command]")
                         if not args.silent:
@@ -1234,8 +1244,8 @@ async def conversation_loop(args):
                     continue
 
                 if SLEEP_PHRASES and any(p in _norm for p in SLEEP_PHRASES):
-                    if not _sleeping:
-                        _sleeping = True
+                    if _awake:
+                        _awake = False
                         if args.verbose:
                             print("  [sleeping by voice command]")
                         if not args.silent:
@@ -1248,7 +1258,7 @@ async def conversation_loop(args):
                                 pass
                     continue
 
-                if _sleeping:
+                if not _awake:
                     if args.verbose:
                         print(f"  [sleeping — ignoring: {user_text!r}]")
                     continue
