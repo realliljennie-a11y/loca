@@ -153,9 +153,8 @@ SLEEP_PHRASES   = [p.lower().strip() for p in TRIGGERS.get("sleep_phrases",
 WAKE_PHRASES    = [p.lower().strip() for p in TRIGGERS.get("wake_phrases",
                    ["wake up", "good morning", "rise and shine"])]
 SLEEP_RESPONSE  = _substitute(TRIGGERS.get("sleep_response") or
-                               f"Goodnight, {USER_NAME}. Sweet dreams!")
-WAKE_RESPONSE   = _substitute(TRIGGERS.get("wake_response") or
-                               f"Good morning, {USER_NAME}!")
+                               "Shhh, I'm going to sleep now.")
+WAKE_RESPONSE   = _substitute(TRIGGERS.get("wake_response") or GREETING)
 
 MAX_RECENT_TURNS = CFG.get("memory", {}).get("max_recent_turns", 20)
 COMPACT_EVERY    = CFG.get("memory", {}).get("compact_every", 10)
@@ -568,21 +567,10 @@ async def ovos_watcher(verbose: bool = False) -> None:
             _ovos_speaking = False
             await asyncio.sleep(5)
 
-async def sleep_watcher(http: httpx.AsyncClient, verbose: bool = False) -> None:
+async def sleep_watcher(verbose: bool = False, silent: bool = False) -> None:
     """Background task: subscribe to HA WebSocket state changes for sleep mode entity."""
     global _sleeping
     import websockets
-
-    # Fetch initial state via REST so sleep mode survives loca-talk restarts.
-    try:
-        r = await http.get(f"{HA_URL}/{SLEEP_ENTITY}",
-                           headers={"Authorization": f"Bearer {HA_TOKEN}"}, timeout=3.0)
-        if r.status_code == 200:
-            _sleeping = r.json().get("state", "").lower() == "on"
-            if verbose:
-                print(f"  [sleep_watcher] initial state: sleeping={_sleeping}")
-    except Exception:
-        pass
 
     ha_base = re.sub(r"/api/.*$", "", HA_URL)
     ws_url  = ha_base.replace("https://", "wss://").replace("http://", "ws://") \
@@ -611,15 +599,27 @@ async def sleep_watcher(http: httpx.AsyncClient, verbose: bool = False) -> None:
 
                 async for raw in ws:
                     msg = json.loads(raw)
-                    if msg.get("type") == "event":
-                        to_state = (msg.get("event", {})
-                                       .get("variables", {})
-                                       .get("trigger", {})
-                                       .get("to_state", {}))
-                        state = to_state.get("state", "").lower()
-                        _sleeping = state in ("on", "true")
-                        if verbose:
-                            print(f"  [sleep_watcher] sleeping: {_sleeping}")
+                    if msg.get("type") != "event":
+                        continue
+                    to_state = (msg.get("event", {})
+                                   .get("variables", {})
+                                   .get("trigger", {})
+                                   .get("to_state", {}))
+                    state       = to_state.get("state", "").lower()
+                    new_sleeping = state in ("on", "true")
+                    if new_sleeping == _sleeping:
+                        continue
+                    _sleeping = new_sleeping
+                    if verbose:
+                        print(f"  [sleep_watcher] sleeping: {_sleeping}")
+                    if not silent:
+                        response = SLEEP_RESPONSE if _sleeping else WAKE_RESPONSE
+                        try:
+                            await asyncio.get_running_loop().run_in_executor(
+                                None, lambda r=response: speak(
+                                    r, voice=DEFAULT_VOICE, speed=SPEED, sink=AUDIO_SINK))
+                        except Exception:
+                            pass
 
         except Exception as e:
             if verbose:
@@ -1048,21 +1048,33 @@ async def conversation_loop(args):
         print(f"  (memory: {long_term[:72]}{'...' if len(long_term) > 72 else ''})")
     turns_since_compact = 0
 
-    if args.greet:
-        print(f"{ASSISTANT_NAME}: {GREETING}")
-        if not args.silent:
-            try:
-                speak(GREETING, voice=voice, speed=speed)
-            except Exception as e:
-                print(f"  [greet failed: {e}]")
-
-    print("\nConversation started. Ctrl-C to exit.\n")
-
     event_queue: asyncio.Queue = asyncio.Queue()
     _readline_task   = None
     _bedtime_watcher = None
 
     async with httpx.AsyncClient(timeout=120) as http:
+        # Fetch initial sleep state before greeting so we know whether to speak.
+        if SLEEP_ENTITY:
+            try:
+                r = await http.get(f"{HA_URL}/{SLEEP_ENTITY}",
+                                   headers={"Authorization": f"Bearer {HA_TOKEN}"}, timeout=3.0)
+                if r.status_code == 200:
+                    _sleeping = r.json().get("state", "").lower() == "on"
+                    if args.verbose:
+                        print(f"  [init] sleeping={_sleeping}")
+            except Exception:
+                pass
+
+        if args.greet and not _sleeping:
+            print(f"{ASSISTANT_NAME}: {GREETING}")
+            if not args.silent:
+                try:
+                    speak(GREETING, voice=voice, speed=speed)
+                except Exception as e:
+                    print(f"  [greet failed: {e}]")
+
+        print("\nConversation started. Ctrl-C to exit.\n")
+
         _sensor_watcher = asyncio.create_task(
                       sensor_watcher(http, event_queue, verbose=args.verbose)) \
                   if TRIGGERS else None
@@ -1073,7 +1085,7 @@ async def conversation_loop(args):
                             ovos_watcher(verbose=args.verbose)) \
                         if OVOS_ENTITY else None
         _sleep_watcher = asyncio.create_task(
-                             sleep_watcher(http, verbose=args.verbose)) \
+                             sleep_watcher(verbose=args.verbose, silent=args.silent)) \
                          if SLEEP_ENTITY else None
 
         while not _shutdown_requested:
