@@ -148,6 +148,7 @@ SYSTEM_PROMPT   = _substitute(_ollama_cfg.get("system_prompt") or CFG.get("syste
 TRIGGERS        = CFG.get("triggers", {})
 OVOS_ENTITY     = TRIGGERS.get("ovos_speaking_entity", "")
 AWAKE_ENTITY    = TRIGGERS.get("awake_entity", "")
+ONLINE_ENTITY   = TRIGGERS.get("online_entity", "binary_sensor.sunny_online")
 SLEEP_PHRASES   = [p.lower().strip() for p in TRIGGERS.get("sleep_phrases",
                    ["go to sleep", "goodnight", "sleep time"])]
 WAKE_PHRASES    = [p.lower().strip() for p in TRIGGERS.get("wake_phrases",
@@ -634,6 +635,24 @@ async def awake_watcher(verbose: bool = False, silent: bool = False) -> None:
 
 # ── Home Assistant context ────────────────────────────────────────────────────
 
+async def _push_online_state(state: str, http: httpx.AsyncClient | None = None) -> None:
+    """Push binary_sensor online/offline state to HA."""
+    if not HA_URL or not HA_TOKEN or not ONLINE_ENTITY:
+        return
+    ha_base = re.sub(r"/api/.*$", "", HA_URL)
+    url     = f"{ha_base}/api/states/{ONLINE_ENTITY}"
+    headers = {"Authorization": f"Bearer {HA_TOKEN}"}
+    payload = {"state": state, "attributes": {"friendly_name": f"{ASSISTANT_NAME} Online"}}
+    try:
+        if http:
+            await http.post(url, json=payload, headers=headers, timeout=5.0)
+        else:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                await client.post(url, json=payload, headers=headers)
+    except Exception:
+        pass
+
+
 async def get_ha_context(http: httpx.AsyncClient,
                           verbose: bool = False) -> str:
     """Fetch nursery state from Home Assistant."""
@@ -1075,6 +1094,8 @@ async def conversation_loop(args):
             except Exception:
                 pass
 
+        await _push_online_state("on", http)
+
         if args.greet and _awake:
             print(f"{ASSISTANT_NAME}: {GREETING}")
             if not args.silent:
@@ -1353,10 +1374,11 @@ async def conversation_loop(args):
         if _bedtime_watcher:
             _bedtime_watcher.cancel()
 
-    # SIGTERM path — save memory, no goodbye
+    # SIGTERM path — save memory, push offline state, no goodbye
     save_recent_turns(history)
-    if history:
-        async with httpx.AsyncClient(timeout=30) as http:
+    async with httpx.AsyncClient(timeout=30) as http:
+        await _push_online_state("off", http)
+        if history:
             await compact_memory(history, long_term, http, verbose=False,
                                  claude_client=claude_client,
                                  openrouter_cfg=openrouter_cfg)

@@ -272,7 +272,8 @@ _install-services:
 		$(PROJ_DIR)/loca-talk.py \
 		$(PROJ_DIR)/loca-say.py \
 		$(PROJ_DIR)/loca-shell.py \
-		$(PROJ_DIR)/loca-quiz.py
+		$(PROJ_DIR)/loca-quiz.py \
+		$(PROJ_DIR)/loca-ha-init.py
 	@echo "  Services installed and enabled."
 	@echo "  loca-watcher will start automatically at next login/reboot,"
 	@echo "  or start now with: systemctl --user start loca-watcher"

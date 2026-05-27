@@ -5,6 +5,7 @@ Wants=bluetooth.target pipewire.service
 
 [Service]
 Type=simple
+ExecStartPre=-@@PROJ_DIR@@/loca-ha-init.py
 ExecStart=@@PROJ_DIR@@/loca-watcher.sh
 Restart=always
 RestartSec=10
