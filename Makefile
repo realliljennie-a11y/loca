@@ -211,7 +211,7 @@ _install-ollama:
 	@echo "  Configuring AMD GPU (Vulkan) override..."
 	@if grep -q "0x1002" /sys/class/drm/card*/device/vendor 2>/dev/null; then \
 		sudo mkdir -p /etc/systemd/system/ollama.service.d; \
-		printf '[Service]\nEnvironment="OLLAMA_VULKAN=1"\nEnvironment="VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.json"\n' \
+		printf '[Service]\nEnvironment="OLLAMA_VULKAN=1"\nEnvironment="VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.json"\nEnvironment="OLLAMA_HOST=0.0.0.0:11434"\n' \
 			| sudo tee /etc/systemd/system/ollama.service.d/override.conf > /dev/null; \
 		sudo systemctl daemon-reload; \
 		echo "  AMD GPU Vulkan override applied."; \
