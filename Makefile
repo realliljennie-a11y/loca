@@ -165,7 +165,7 @@ _install-python:
 	@$(VENV)/bin/python3 -m pip install --quiet --upgrade pip
 	@$(VENV)/bin/python3 -m pip install --quiet \
 		kokoro soundfile bleak httpx faster-whisper \
-		pyyaml sounddevice numpy websockets
+		pyyaml sounddevice numpy websockets aiohttp
 	@echo "  Python environment ready."
 
 # ── Bluetooth ─────────────────────────────────────────────────────────────────
@@ -211,7 +211,7 @@ _install-ollama:
 	@echo "  Configuring AMD GPU (Vulkan) override..."
 	@if grep -q "0x1002" /sys/class/drm/card*/device/vendor 2>/dev/null; then \
 		sudo mkdir -p /etc/systemd/system/ollama.service.d; \
-		printf '[Service]\nEnvironment="OLLAMA_VULKAN=1"\nEnvironment="VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.json"\nEnvironment="OLLAMA_HOST=0.0.0.0:11434"\n' \
+		printf '[Service]\nEnvironment="OLLAMA_VULKAN=1"\nEnvironment="VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.json"\nEnvironment="OLLAMA_HOST=127.0.0.1:11435"\n' \
 			| sudo tee /etc/systemd/system/ollama.service.d/override.conf > /dev/null; \
 		sudo systemctl daemon-reload; \
 		echo "  AMD GPU Vulkan override applied."; \
@@ -261,8 +261,9 @@ _install-services:
 	@mkdir -p ~/.config/systemd/user
 	@sed "s|@@PROJ_DIR@@|$(PROJ_DIR)|g" $(PROJ_DIR)/loca-watcher.service > ~/.config/systemd/user/loca-watcher.service
 	@sed "s|@@PROJ_DIR@@|$(PROJ_DIR)|g" $(PROJ_DIR)/loca-talk.service    > ~/.config/systemd/user/loca-talk.service
+	@sed "s|@@PROJ_DIR@@|$(PROJ_DIR)|g" $(PROJ_DIR)/loca-proxy.service   > ~/.config/systemd/user/loca-proxy.service
 	@systemctl --user daemon-reload
-	@systemctl --user enable loca-watcher.service
+	@systemctl --user enable loca-watcher.service loca-proxy.service
 	@echo "  Enabling linger for $(USER) (services run without login)..."
 	@sudo loginctl enable-linger $(USER)
 	@echo "  Making scripts executable..."
@@ -273,17 +274,19 @@ _install-services:
 		$(PROJ_DIR)/loca-say.py \
 		$(PROJ_DIR)/loca-shell.py \
 		$(PROJ_DIR)/loca-quiz.py \
-		$(PROJ_DIR)/loca-ha-init.py
+		$(PROJ_DIR)/loca-ha-init.py \
+		$(PROJ_DIR)/loca-proxy.py
 	@echo "  Services installed and enabled."
 	@echo "  loca-watcher will start automatically at next login/reboot,"
 	@echo "  or start now with: systemctl --user start loca-watcher"
 
 _uninstall-services:
 	@echo "--- Removing systemd user services ---"
-	@systemctl --user stop loca-watcher.service loca-talk.service 2>/dev/null || true
-	@systemctl --user disable loca-watcher.service 2>/dev/null || true
+	@systemctl --user stop loca-watcher.service loca-talk.service loca-proxy.service 2>/dev/null || true
+	@systemctl --user disable loca-watcher.service loca-proxy.service 2>/dev/null || true
 	@rm -f ~/.config/systemd/user/loca-watcher.service
 	@rm -f ~/.config/systemd/user/loca-talk.service
+	@rm -f ~/.config/systemd/user/loca-proxy.service
 	@systemctl --user daemon-reload
 	@echo "  Services removed."
 	@echo "  Note: loginctl linger left enabled for $(USER)."

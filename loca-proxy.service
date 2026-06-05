@@ -1,0 +1,15 @@
+[Unit]
+Description=LOCA GPU fan proxy for Ollama
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=@@PROJ_DIR@@/loca-proxy.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

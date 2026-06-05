@@ -193,42 +193,6 @@ def _handle_signal(signum, frame):
 
 signal.signal(signal.SIGTERM, _handle_signal)
 
-# ── GPU fan control ───────────────────────────────────────────────────────────
-
-_AMDGPU_HWMON: Path | None = None
-
-def _find_amdgpu_hwmon() -> Path | None:
-    global _AMDGPU_HWMON
-    if _AMDGPU_HWMON is not None:
-        return _AMDGPU_HWMON
-    try:
-        for hwmon in Path('/sys/class/hwmon').iterdir():
-            if (hwmon / 'name').read_text().strip() == 'amdgpu':
-                _AMDGPU_HWMON = hwmon
-                return hwmon
-    except OSError:
-        pass
-    return None
-
-def _gpu_fan_set(pct: int = 80) -> None:
-    hwmon = _find_amdgpu_hwmon()
-    if not hwmon:
-        return
-    try:
-        (hwmon / 'pwm1_enable').write_text('1')
-        (hwmon / 'pwm1').write_text(str(int(pct / 100 * 255)))
-    except OSError:
-        pass
-
-def _gpu_fan_auto() -> None:
-    hwmon = _find_amdgpu_hwmon()
-    if not hwmon:
-        return
-    try:
-        (hwmon / 'pwm1_enable').write_text('2')
-    except OSError:
-        pass
-
 # ── Memory ────────────────────────────────────────────────────────────────────
 
 def load_memory() -> tuple[list[dict], str]:
@@ -303,12 +267,8 @@ async def compact_memory(history: list[dict],
                 "stream":  False,
                 "options": {"num_predict": 300},
             }
-            _gpu_fan_set()
-            try:
-                resp = await http.post(OLLAMA_URL, json=payload, timeout=60.0)
-                new_memory = resp.json()["message"]["content"].strip()
-            finally:
-                _gpu_fan_auto()
+            resp = await http.post(OLLAMA_URL, json=payload, timeout=60.0)
+            new_memory = resp.json()["message"]["content"].strip()
         MEMORY_DIR.mkdir(exist_ok=True)
         LONG_TERM_FILE.write_text(new_memory)
         if verbose:
@@ -929,21 +889,17 @@ async def llm_respond(history: list[dict],
         "options":  OLLAMA_OPTIONS,
     }
     response_text = ""
-    _gpu_fan_set()
-    try:
-        async with http.stream("POST", OLLAMA_URL, json=payload) as resp:
-            async for line in resp.aiter_lines():
-                if not line:
-                    continue
-                try:
-                    chunk = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                token = chunk.get("message", {}).get("content", "")
-                if token:
-                    response_text += token
-    finally:
-        _gpu_fan_auto()
+    async with http.stream("POST", OLLAMA_URL, json=payload) as resp:
+        async for line in resp.aiter_lines():
+            if not line:
+                continue
+            try:
+                chunk = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            token = chunk.get("message", {}).get("content", "")
+            if token:
+                response_text += token
     return _trim_to_last_sentence(response_text)
 
 
