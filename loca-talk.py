@@ -66,6 +66,11 @@ MIC_CHANNELS    = 1
 
 DEFAULT_VOICE   = CFG["tts"]["voice"]
 SPEED           = CFG["tts"]["speed"]
+_PRONUNCIATION_FIXES: list[tuple[re.Pattern, str]] = [
+    (re.compile(r'\b' + entry["match"] + r'\b', re.IGNORECASE), entry["replacement"])
+    for entry in CFG.get("tts", {}).get("pronunciation_fixes", [])
+    if "match" in entry and "replacement" in entry
+]
 
 _ollama_llm_cfg = CFG.get("ollama", {})
 OLLAMA_URL      = _ollama_llm_cfg.get("url", "http://localhost:11434/api/chat")
@@ -695,19 +700,6 @@ def _get_tts() -> KPipeline:
 # ── TTS → speaker ─────────────────────────────────────────────────────────────
 
 # Kokoro mispronounces certain words; substitute phonetic spellings before synthesis.
-_PRONUNCIATION_FIXES: list[tuple[re.Pattern, str]] = [
-    (re.compile(r'\bdiapees\b', re.IGNORECASE), 'dypees'),
-    (re.compile(r'\bdiapee\b',  re.IGNORECASE), 'dypee'),
-    (re.compile(r'\bdiapers\b', re.IGNORECASE), 'dypers'),
-    (re.compile(r'\bdiaper\b',  re.IGNORECASE), 'dyper'),
-    (re.compile(r'\bdipees\b',  re.IGNORECASE), 'dypees'),
-    (re.compile(r'\bdipee\b',   re.IGNORECASE), 'dypee'),
-    (re.compile(r'\bdiapies\b', re.IGNORECASE), 'dypees'),
-    (re.compile(r'\bdiapie\b',  re.IGNORECASE), 'dypee'),
-    (re.compile(r'\bmybaby\b',          re.IGNORECASE), 'my baby'),
-    (re.compile(r'\bmysweetlittleone\b', re.IGNORECASE), 'my sweet little one'),
-]
-
 def _apply_pronunciation_fixes(text: str) -> str:
     for pattern, replacement in _PRONUNCIATION_FIXES:
         def _replace(m, r=replacement):
