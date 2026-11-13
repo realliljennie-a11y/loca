@@ -285,8 +285,10 @@ def device_is_connected() -> bool:
     result = subprocess.run(
         ["pactl", "list", "sinks", "short"],
         capture_output=True, text=True)
-    mac_underscored = BT_MAC.replace(":", "_")
-    return mac_underscored in result.stdout
+    # Match the configured sink name exactly. PipeWire's bluez naming has
+    # changed between versions, so don't derive it from the MAC.
+    return any(len(cols) > 1 and cols[1] == AUDIO_SINK
+               for cols in (line.split("\t") for line in result.stdout.splitlines()))
 
 async def wait_for_device(timeout: float = 300.0) -> bool:
     """Wait for device's audio sink to appear. Returns True when found."""
@@ -332,7 +334,7 @@ def calibrate_noise_floor(source: str = AUDIO_SOURCE,
     chunks_needed = int(calibration_secs / 0.05)
 
     proc = subprocess.Popen(
-        ["pw-record",
+        ["pw-record", "--raw",
          f"--target={source}",
          "--channels=1",
          f"--rate={MIC_RATE}",
@@ -686,17 +688,31 @@ def speak(text: str,
         # Prepend silence to avoid HFP transport clipping the start
         silence = np.zeros(int(24000 * 0.15), dtype=np.int16)
         pcm_bytes = np.concatenate([silence, pcm_int16]).tobytes()
-        pw = subprocess.Popen(
-            ["pw-play",
-             f"--target={sink}",
-             "--channels=1",
-             "--rate=24000",
-             "--format=s16",
-             "-"],
-            stdin=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        pw.communicate(input=pcm_bytes)
+        # PipeWire 1.6: the bear's HFP speaker only plays while its mic is
+        # also open, so hold the mic open (discarding input) during playback.
+        mic = subprocess.Popen(
+            ["pw-record", "--raw", f"--target={AUDIO_SOURCE}", "--channels=1",
+             f"--rate={MIC_RATE}", "--format=s16", "/dev/null"],
+            stderr=subprocess.DEVNULL)
+        time.sleep(0.5)  # give the Bluetooth link a moment to come up
+        try:
+            pw = subprocess.Popen(
+                ["pw-play", "--raw",
+                 f"--target={sink}",
+                 "--channels=1",
+                 "--rate=24000",
+                 "--format=s16",
+                 "-"],
+                stdin=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            _, err = pw.communicate(input=pcm_bytes)
+            if pw.returncode != 0:
+                print(f"  [pw-play failed ({pw.returncode}): "
+                      f"{err.decode(errors='replace').strip()}]", flush=True)
+        finally:
+            mic.terminate()
+            mic.wait()
     finally:
         _sunny_speaking = False
 
@@ -713,7 +729,7 @@ def record_utterance(source: str = AUDIO_SOURCE,
     max_chunks   = int(MAX_RECORD_SECS / chunk_secs)
 
     proc = subprocess.Popen(
-        ["pw-record",
+        ["pw-record", "--raw",
          f"--target={source}",
          f"--channels={MIC_CHANNELS}",
          f"--rate={MIC_RATE}",

@@ -71,7 +71,7 @@ def main():
     pcm_bytes = np.concatenate([silence, pcm_int16]).tobytes()
 
     pw = subprocess.Popen(
-        ["pw-play",
+        ["pw-play", "--raw",
          f"--target={AUDIO_SINK}",
          "--channels=1",
          f"--rate={RATE}",

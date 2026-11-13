@@ -34,7 +34,9 @@ poe_bt_connected() {
 }
 
 poe_audio_ready() {
-    pactl list sinks short 2>/dev/null | grep -q "${BT_MAC//:/_}"
+    # Match the configured sink name exactly (column 2). PipeWire's bluez
+    # naming has changed between versions, so don't derive it from the MAC.
+    pactl list sinks short 2>/dev/null | awk -v s="$AUDIO_SINK" '$2 == s {f=1} END {exit !f}'
 }
 
 loca_talk_running() {
@@ -51,9 +53,7 @@ setup_audio() {
     sleep 1
     # Verify volume was set
     local vol
-    vol=$(pactl list sources 2>/dev/null | \
-          grep -A 5 "$AUDIO_SOURCE" | \
-          grep "Volume:" | \
+    vol=$(pactl get-source-volume "$AUDIO_SOURCE" 2>/dev/null | \
           grep -o '[0-9]*%' | head -1)
     log "Audio ready. Mic volume: ${vol:-unknown}"
 }

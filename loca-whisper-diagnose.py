@@ -59,7 +59,7 @@ def calibrate_noise_floor(seconds: float = 1.0) -> float:
     chunk_bytes  = chunk_frames * MIC_CHANNELS * 2
     num_chunks   = int(seconds / 0.05)
     proc = subprocess.Popen(
-        ["pw-record", f"--target={AUDIO_SOURCE}", f"--channels={MIC_CHANNELS}",
+        ["pw-record", "--raw", f"--target={AUDIO_SOURCE}", f"--channels={MIC_CHANNELS}",
          f"--rate={MIC_RATE}", "--format=s16", "--latency=50", "-"],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     rms_values = []
@@ -86,7 +86,7 @@ def record_utterance(threshold: float) -> bytes | None:
     max_chunks     = int(MAX_RECORD_SECS / chunk_secs)
 
     proc = subprocess.Popen(
-        ["pw-record", f"--target={AUDIO_SOURCE}", f"--channels={MIC_CHANNELS}",
+        ["pw-record", "--raw", f"--target={AUDIO_SOURCE}", f"--channels={MIC_CHANNELS}",
          f"--rate={MIC_RATE}", "--format=s16", "--latency=50", "-"],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 

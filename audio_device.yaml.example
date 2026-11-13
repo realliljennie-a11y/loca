@@ -14,8 +14,9 @@
 audio:
   input:
     # PipeWire source name for your microphone:
-    source: bluez_input.YOUR_MAC_UNDERSCORED.0
-                                        # e.g. bluez_input.66_58_94_72_31_24.0
+    source: bluez_input.YOUR:BT:MAC:HERE
+                                        # e.g. bluez_input.66:58:94:72:31:24
+                                        # (PipeWire < 1.6: bluez_input.66_58_94_72_31_24.0)
                                         # or:  alsa_input.usb_your_mic_name
 
     # Bluetooth MAC address — enables connection monitoring and auto-reconnect.
@@ -25,7 +26,7 @@ audio:
     # PipeWire card and HFP profile — only needed for Bluetooth HFP devices.
     # Remove if your mic is not HFP (e.g. it's a USB mic or A2DP-only device).
     bt_card: bluez_card.YOUR_MAC_UNDERSCORED
-    bt_profile: headset-head-unit-msbc
+    bt_profile: headset-head-unit       # mSBC; PipeWire < 1.6: headset-head-unit-msbc
 
     # Microphone gain boost (PipeWire/PulseAudio volume string).
     # 100% = unity gain. Many Bluetooth mics need 200–300% to be usable.
@@ -33,8 +34,9 @@ audio:
 
   output:
     # PipeWire sink name for your speaker:
-    sink: bluez_output.YOUR_MAC_UNDERSCORED.1
-                                        # e.g. bluez_output.66_58_94_72_31_24.1
+    sink: bluez_output.YOUR:BT:MAC:HERE
+                                        # e.g. bluez_output.66:58:94:72:31:24
+                                        # (PipeWire < 1.6: bluez_output.66_58_94_72_31_24.1)
                                         # or:  alsa_output.usb_your_speaker_name
 
     # Bluetooth MAC address for the output device.
