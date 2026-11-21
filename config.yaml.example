@@ -82,6 +82,7 @@ triggers:
   #   - entity: binary_sensor.your_sensor
   #     watch_state: on
   #     event_text: "The sensor just turned on."
+  #     cooldown: 30   # optional: ignore repeats of this trigger for 30 s
 
   # Illuminance sensor: assistant reacts to significant light level changes.
   # Set to your sensor's entity ID, or leave blank to disable.

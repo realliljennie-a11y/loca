@@ -396,11 +396,16 @@ async def sensor_watcher(http: httpx.AsyncClient,
     if not entities:
         return
 
-    # entity → list of (watch_state, event_text) pairs
-    sensor_map: dict[str, list[tuple[str, str]]] = {}
+    # entity → list of (watch_state, event_text, cooldown_seconds) triples.
+    # cooldown (optional, default 0): after this trigger fires, ignore repeats
+    # of it for that many seconds, so e.g. a rattle that starts and stops
+    # several times in a row only gets commented on once.
+    sensor_map: dict[str, list[tuple[str, str, float]]] = {}
     for s in sensor_cfgs:
         sensor_map.setdefault(s["entity"], []).append(
-            (s["watch_state"].lower(), s["event_text"]))
+            (s["watch_state"].lower(), _substitute(s["event_text"]),
+             float(s.get("cooldown", 0))))
+    last_fired: dict[tuple[str, str], float] = {}   # (entity, watch_state) → monotonic time
 
     ha_base = re.sub(r"/api/.*$", "", HA_URL)
     ws_url  = ha_base.replace("https://", "wss://").replace("http://", "ws://") \
@@ -464,10 +469,17 @@ async def sensor_watcher(http: httpx.AsyncClient,
                         last_illum_band = band
                         continue
 
-                    for watch_state, event_text in sensor_map.get(entity_id, []):
+                    for watch_state, event_text, cooldown in sensor_map.get(entity_id, []):
                         if from_state not in ("unavailable", "unknown") \
                                 and from_state != to_state \
                                 and to_state == watch_state:
+                            key = (entity_id, watch_state)
+                            now = time.monotonic()
+                            if now - last_fired.get(key, -math.inf) < cooldown:
+                                if verbose:
+                                    print(f"  [sensor_watcher] cooldown, skipping: {event_text!r}")
+                                continue
+                            last_fired[key] = now
                             if verbose:
                                 print(f"  [sensor_watcher] queuing: {event_text!r}")
                             await event_queue.put(event_text)
