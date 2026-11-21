@@ -1,4 +1,4 @@
-FROM sunny-llama-3.1-8b-v8.Q4_K_M.gguf
+FROM sunny-llama-3.1-8b-v9.Q4_K_M.gguf
 
 SYSTEM ""
 
