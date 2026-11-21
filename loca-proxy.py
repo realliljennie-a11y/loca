@@ -118,7 +118,7 @@ async def _proxy(request: web.Request) -> web.StreamResponse:
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main() -> None:
-    app = web.Application()
+    app = web.Application(client_max_size=0)  # no cap — ollama blob uploads (GGUF) exceed aiohttp's 1MiB default
     app.router.add_route('*', '/{path_info:.*}', _proxy)
     web.run_app(app, host=LISTEN_HOST, port=LISTEN_PORT, print=None)
 
